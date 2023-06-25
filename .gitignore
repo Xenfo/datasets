@@ -1,0 +1,10 @@
+# Exclude all files except the ones we need
+*
+
+# The ones we need
+!deno.*
+!main.ts
+!LICENSE
+!.vscode
+!.vscode/*
+!.gitignore
