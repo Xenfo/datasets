@@ -20,28 +20,35 @@ const tag = new Command()
       Deno.exit(1);
     }
 
-    const dirEntries = Deno.readDir(dataset);
-    Deno.chdir(dataset);
-
-    let index = start ?? 0;
-    for await (const dirEntry of dirEntries) {
+    const files = [];
+    for await (const dirEntry of Deno.readDir(dataset)) {
       if (!dirEntry.isFile || dirEntry.name.toLowerCase().endsWith(".yaml")) {
         continue;
       }
 
-      const newName = dirEntry.name.toLowerCase().split(".").map((part, i) =>
+      files.push(dirEntry);
+    }
+
+    Deno.chdir(dataset);
+    let index = start ?? 0;
+    for await (
+      const file of files.sort((a, b) => a.name.localeCompare(b.name))
+    ) {
+      const newName = file.name.toLowerCase().split(".").map((part, i) =>
         i === 0 ? index.toString().padStart(5, "0") : part
       ).join(".");
-      index++;
 
-      if (dirEntry.name === newName) {
+      if (file.name === newName) {
+        index++;
         continue;
       }
 
-      console.log(`${blue("Info:")} Tagging ${dirEntry.name}`);
+      console.log(
+        `${blue("Info:")} Tagging ${file.name}, new name: ${newName}`,
+      );
 
       await new Deno.Command("wsl-open", {
-        args: [dirEntry.name],
+        args: [file.name],
       }).output();
 
       const result = await prompt([{
@@ -64,48 +71,6 @@ const tag = new Command()
         type: List,
       }]);
 
-      if (!result.continue) {
-        await Deno.remove(dirEntry.name);
-        continue;
-      }
-
-      if (dirEntry.name.toLowerCase().endsWith(".heic")) {
-        await new Deno.Command(
-          "heif-convert",
-          {
-            args: [
-              "-q",
-              "100",
-              dirEntry.name,
-              newName.replace(".heic", ".png"),
-            ],
-          },
-        ).output();
-
-        await Deno.remove(dirEntry.name);
-      } else {
-        await Deno.rename(dirEntry.name, newName);
-      }
-
-      const yaml = stringify({
-        main_prompt: result.prompt,
-        tags: result.tags?.map((tag) =>
-          tag.match(":")
-            ? tag.split(":").reduce((acc, curr, i) => ({
-              ...acc,
-              ...{
-                [i === 0 ? "tag" : "weight"]: i === 0 ? curr : parseFloat(curr),
-              },
-            }), {})
-            : tag
-        ),
-      });
-
-      await Deno.writeFile(
-        newName.replace(/\..+/g, ".yaml"),
-        new TextEncoder().encode(yaml),
-      );
-
       await new Deno.Command(
         "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
         {
@@ -117,6 +82,52 @@ const tag = new Command()
           ],
         },
       ).output();
+
+      if (!result.continue) {
+        await Deno.remove(file.name);
+        continue;
+      }
+
+      if (file.name.toLowerCase().endsWith(".heic")) {
+        await new Deno.Command(
+          "heif-convert",
+          {
+            args: [
+              "-q",
+              "100",
+              file.name,
+              newName.replace(".heic", ".png"),
+            ],
+          },
+        ).output();
+
+        await Deno.remove(file.name);
+      } else {
+        await Deno.rename(file.name, newName);
+      }
+
+      const yaml = stringify({
+        main_prompt: result.prompt,
+        tags: result.tags?.map((tag) =>
+          tag.match(":")
+            ? tag.split(":").reduce((acc, curr, i) => ({
+              ...acc,
+              ...{
+                [i === 0 ? "tag" : "weight"]: i === 0
+                  ? curr.replace("_", " ")
+                  : parseFloat(curr),
+              },
+            }), {})
+            : tag.replace("_", " ")
+        ),
+      });
+
+      await Deno.writeFile(
+        newName.replace(/\..+/g, ".yaml"),
+        new TextEncoder().encode(yaml),
+      );
+
+      index++;
     }
   });
 
